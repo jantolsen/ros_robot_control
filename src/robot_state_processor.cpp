@@ -36,7 +36,8 @@ namespace Control
         RobotStateProcessor::RobotStateProcessor(
             ros::NodeHandle& nh)
         :
-            nh_(nh)
+            nh_(nh),
+            tfListener_(tfBuffer_)
         {
             // Initialize Subscriber
             controller_joint_state_sub_ = nh_.subscribe("/controller_joint_states", 1, &RobotStateProcessor::jointStateCallback, this);
@@ -116,6 +117,9 @@ namespace Control
 
             // Publish Joint-State
             joint_state_pub_.publish(joint_state_calc_);
+
+            // Tool-State Callback
+            toolStateCallback();
         } // Function End: jointStateCallback()
 
 
@@ -145,8 +149,8 @@ namespace Control
             tool_state_calc_.name = tool_transform_stamped.child_frame_id;
             // Position
             tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
-            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
-            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
+            tool_state_calc_.pose.position.y = tool_transform_stamped.transform.translation.y;
+            tool_state_calc_.pose.position.z = tool_transform_stamped.transform.translation.z;
             // Orientation
             geometry_msgs::Point euler_angles = Toolbox::Convert::quaternionToEuler(tool_transform_stamped.transform.rotation);
             tool_state_calc_.pose.orientation.x = Toolbox::Convert::radToDeg(euler_angles.x);
@@ -203,11 +207,11 @@ namespace Control
         // Calculate Tool-State Derivatives
         // -------------------------------
         void RobotStateProcessor::calculateToolDerivatives(
-            const geometry_msgs::TransformStamped& tool_transform,
+            const geometry_msgs::TransformStamped& tool_transform_stamped,
             robot_data_msgs::ToolState& tool_state_calc)
         {
             // Calculate time difference
-            ros::Duration dt = tool_transform.header.stamp - prev_tool_timestamp_;
+            ros::Duration dt = tool_transform_stamped.header.stamp - prev_tool_timestamp_;
 
             // Check for zero time difference
             if(dt.toSec() == 0.0)
@@ -218,22 +222,35 @@ namespace Control
 
             // Calculate tool translational velocity
             // (numerical differentiation)
-            tool_state_calc.velocity.linear.x = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.x, prev_tool_position_.position.x, dt.toSec());
-            tool_state_calc.velocity.linear.y = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.y, prev_tool_position_.position.y, dt.toSec());
-            tool_state_calc.velocity.linear.z = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.z, prev_tool_position_.position.z, dt.toSec());
+            tool_state_calc.velocity.linear.x = Toolbox::Math::numericalDifferentiation(tool_transform_stamped.transform.translation.x, prev_tool_pose_.position.x, dt.toSec());
+            tool_state_calc.velocity.linear.y = Toolbox::Math::numericalDifferentiation(tool_transform_stamped.transform.translation.y, prev_tool_pose_.position.y, dt.toSec());
+            tool_state_calc.velocity.linear.z = Toolbox::Math::numericalDifferentiation(tool_transform_stamped.transform.translation.z, prev_tool_pose_.position.z, dt.toSec());
 
             // Calculate tool rotational velocity
             // (numerical differentiation)
             geometry_msgs::Point euler_angles = Toolbox::Convert::quaternionToEuler(tool_transform_stamped.transform.rotation);
-            tool_state_calc.velocity.angular.x = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.x), prev_tool_position_.orientation.x, dt.toSec());
-            tool_state_calc.velocity.angular.y = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.y), prev_tool_position_.orientation.y, dt.toSec());
-            tool_state_calc.velocity.angular.z = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.z), prev_tool_position_.orientation.z, dt.toSec());
+            tool_state_calc.velocity.angular.x = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.x), prev_tool_pose_.orientation.x, dt.toSec());
+            tool_state_calc.velocity.angular.y = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.y), prev_tool_pose_.orientation.y, dt.toSec());
+            tool_state_calc.velocity.angular.z = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.z), prev_tool_pose_.orientation.z, dt.toSec());
+
+            // Calculate tool translational acceleration
+            // (numerical differentiation)
+            tool_state_calc.acceleration.linear.x = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.x, prev_tool_velocity_.linear.x, dt.toSec());
+            tool_state_calc.acceleration.linear.y = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.y, prev_tool_velocity_.linear.y, dt.toSec());
+            tool_state_calc.acceleration.linear.z = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.z, prev_tool_velocity_.linear.z, dt.toSec());
+
+            // Calculate tool rotational acceleration
+            // (numerical differentiation)
+            tool_state_calc.acceleration.angular.x = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.x, prev_tool_velocity_.angular.x, dt.toSec());
+            tool_state_calc.acceleration.angular.y = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.y, prev_tool_velocity_.angular.y, dt.toSec());
+            tool_state_calc.acceleration.angular.z = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.z, prev_tool_velocity_.angular.z, dt.toSec());
 
             // Update previous tool values
-            prev_tool_position_ = tool_state_calc.position;
+            prev_tool_pose_ = tool_state_calc.pose;
+            prev_tool_velocity_ = tool_state_calc.velocity;
 
             // Update previous timestamp
-            prev_tool_timestamp_ = tool_transform.header.stamp;
+            prev_tool_timestamp_ = tool_transform_stamped.header.stamp;
         } // Function End: calculateToolDerivatives()
 
 } // End Namespace: Control

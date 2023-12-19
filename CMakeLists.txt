@@ -15,7 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   sensor_msgs
   robot_toolbox
-  info_msgs
+  robot_data_msgs
+  # info_msgs
   # target_msgs
   # object_msgs
 )
@@ -124,6 +125,7 @@ catkin_package(
     geometry_msgs
     sensor_msgs
     robot_toolbox
+    robot_data_msgs
     # info_msgs
     # target_msgs
     # object_msgs
@@ -178,6 +180,22 @@ target_link_libraries(
 #   ${catkin_LIBRARIES}
 # )
 
+add_executable(test_robot_state 
+  test/test_robot_state.cpp)
+
+target_link_libraries(test_robot_state
+  ${catkin_LIBRARIES}
+  ${PROJECT_NAME}
+)
+
+add_executable(test_actionclient 
+  test/test_actionclient.cpp)
+
+target_link_libraries(test_actionclient
+  ${catkin_LIBRARIES}
+  ${PROJECT_NAME}
+)
+
 #############
 ## Install ##
 #############
@@ -202,7 +220,7 @@ target_link_libraries(
 # See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html
 install(
   TARGETS 
-    # ${PROJECT_NAME}
+    ${PROJECT_NAME}
   ARCHIVE DESTINATION 
     ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION 

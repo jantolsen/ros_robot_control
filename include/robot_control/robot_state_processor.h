@@ -34,8 +34,16 @@
     // Ros
     #include <ros/ros.h>
 
+    // ROS Messages
+    #include <sensor_msgs/JointState.h>
+    #include <geometry_msgs/Twist.h>
+
     // Robotics Toolbox
-    #include <robot_toolbox/toolbox.h>
+    #include "robot_toolbox/toolbox.h"
+
+    // Robotics Messages
+    #include "robot_data_msgs/JointState.h"
+    #include "robot_data_msgs/ToolState.h"
 
 // Namespace: Control
 // -------------------------------
@@ -102,18 +110,45 @@ class RobotStateProcessor
             const sensor_msgs::JointState::ConstPtr& joint_state_msg);
 
 
-        // Calculate Derivatives
+        // Tool-State Callback
         // -------------------------------
-        /** \brief Calculate Derivatives
+        /** \brief Tool-State Callback
         *
-        * Calculates velocity and acceleration using incomming position readings and the time-stamp.
+        * This is not a direct callback function for Tool-State, but is rather registered
+        * to be called whenever the joint-state-callback function is called/executed. 
+        * The function listens for transformation using the transformation listener, 
+        * and then processes the obtained tool-state to calculate an extend tool-state 
+        * containing tool velocity and and acceleration information.
+        */
+        void toolStateCallback();
+
+
+        // Calculate Joint-State Derivatives
+        // -------------------------------
+        /** \brief Calculate Joint-State Derivatives
+        *
+        * Calculates joint-state velocity and acceleration using incomming position readings and the time-stamp.
         *
         * \param joint_state_msg    Received Joint-State message pointer [sensor_msgs::JointState::ConstPtr&]
-        * \param joint_state_calc   Calculated Joint-State message with velocity and acceleration [sensor_msgs::JointState]
+        * \param joint_state_calc   Calculated Joint-State message with velocity and acceleration [robot_data_msgs::JointState]
         */
-        void calculateDerivatives(
+        void calculateJointDerivatives(
             const sensor_msgs::JointState::ConstPtr& joint_state_msg,
-            sensor_msgs::JointState& joint_state_calc);
+            robot_data_msgs::JointState& joint_state_calc);
+
+
+        // Calculate Tool-State Derivatives
+        // -------------------------------
+        /** \brief Calculate Tool-State Derivatives
+        *
+        * Calculates tool-state velocity and acceleration using incomming position readings and the time-stamp.
+        *
+        * \param tool_transform     Received Tool-State transformation [geometry_msgs::TransformStamped]
+        * \param tool_state_calc    Calculated Tool-State with velocity and acceleration [robot_data_msgs::ToolState]
+        */
+        void calculateToolDerivatives(
+            const geometry_msgs::TransformStamped& tool_transform,
+            robot_data_msgs::ToolState& tool_state_calc);
 
 
     // Private Class members
@@ -127,13 +162,19 @@ class RobotStateProcessor
         // -------------------------------
         ros::NodeHandle nh_;
 
+        // Transformation manager
+        tf2_ros::Buffer tfBuffer_;
+        tf2_ros::TransformListener tfListener_;
+
         // Class Local Member(s)
         // -------------------------------
-        sensor_msgs::JointState joint_state_;
-        ros::Time prev_timestamp_;
-        std::map<std::string, double> prev_joint_position_map_;
-        std::map<std::string, double> prev_joint_velocity_map_;
-
+        ros::Time prev_joint_timestamp_;
+        ros::Time prev_tool_timestamp_;
+        std::vector<double> prev_joint_position_;
+        std::vector<double> prev_joint_velocity_;
+        robot_toolbox::PoseRPY prev_tool_pose_;
+        geometry_msgs::Twist prev_tool_velocity_;
+        
         // ROS Subscriber(s)
         // -------------------------------
         ros::Subscriber controller_joint_state_sub_;
@@ -141,6 +182,7 @@ class RobotStateProcessor
         // ROS Publsiher(s)
         // -------------------------------
         ros::Publisher joint_state_pub_;
+        ros::Publisher tool_state_pub_;
 
 
 }; // End Class: RobotStateProcessor

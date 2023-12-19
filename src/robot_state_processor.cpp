@@ -38,7 +38,18 @@ namespace Control
         :
             nh_(nh)
         {
-            // Initialize Template-Class
+            // Initialize Subscriber
+            controller_joint_state_sub_ = nh_.subscribe("/controller_joint_states", 1, &RobotStateProcessor::jointStateCallback, this);
+
+            // Initialize Publisher
+            joint_state_pub_ = nh_.advertise<robot_data_msgs::JointState>("robot_data/joint_states", 1);
+            tool_state_pub_ = nh_.advertise<robot_data_msgs::ToolState>("robot_data/tool_states", 1);
+
+            // Transformation Manager
+            tf2_ros::Buffer tfBuffer;
+            tf2_ros::TransformListener tfListener(tfBuffer);
+
+            // Initialize RobotStateProcessor
             init();
         } // Class Constructor End: RobotStateProcessor()
 
@@ -69,20 +80,160 @@ namespace Control
         void RobotStateProcessor::jointStateCallback(
             const sensor_msgs::JointState::ConstPtr& joint_state_msg)
         {
+            // Check for empty previous position or zero previous timestamp
+            if(prev_joint_position_.empty() || (prev_joint_timestamp_ == ros::Time(0)))
+            {
+                // Initialize previous joint state
+                prev_joint_position_.resize(joint_state_msg->name.size(), 0.0);
+                prev_joint_velocity_.resize(joint_state_msg->name.size(), 0.0);
 
+                // Iterate through joint-state message
+                for (int i = 0; i < joint_state_msg->name.size(); i++)
+                {
+                    // Assign previous joint position to joint-state position
+                    prev_joint_position_[i] = joint_state_msg->position[i];
+                    // Assign previous joint velocity to zero 
+                    prev_joint_velocity_[i] = 0.0;
+                }
+
+                // Assign previous timestamp to current timestamp
+                prev_joint_timestamp_ = joint_state_msg->header.stamp;
+
+                // Function return
+                return;
+            }
+
+            // Create new Joint-State
+            robot_data_msgs::JointState joint_state_calc_;
+
+            // Populate header, name and position fields
+            joint_state_calc_.header = joint_state_msg->header;
+            joint_state_calc_.name = joint_state_msg->name;
+            joint_state_calc_.position = joint_state_msg->position;
+
+            // Calculate Derivatives (Velocity and Acceleration)
+            calculateJointDerivatives(joint_state_msg, joint_state_calc_);
+
+            // Publish Joint-State
+            joint_state_pub_.publish(joint_state_calc_);
         } // Function End: jointStateCallback()
 
 
-        // Calculate Derivatives
+        // Tool-State Callback
         // -------------------------------
-        void RobotStateProcessor::calculateDerivatives(
+        void RobotStateProcessor::toolStateCallback()
+        {
+            // Get transformation from world to tool
+            geometry_msgs::TransformStamped tool_transform_stamped;
+            try
+            {
+                tool_transform_stamped = tfBuffer_.lookupTransform("world", "tool0", ros::Time(0));
+            }
+            catch (tf2::TransformException &ex) 
+            {
+                ROS_WARN("%s",ex.what());
+                ros::Duration(1.0).sleep();
+                return;
+            }
+
+            // Create new Tool-State
+            robot_data_msgs::ToolState tool_state_calc_;
+
+            // Populate header, name and pose fields
+            tool_state_calc_.header = tool_transform_stamped.header;
+            tool_state_calc_.frame = tool_transform_stamped.header.frame_id;
+            tool_state_calc_.name = tool_transform_stamped.child_frame_id;
+            // Position
+            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
+            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
+            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
+            // Orientation
+            geometry_msgs::Point euler_angles = Toolbox::Convert::quaternionToEuler(tool_transform_stamped.transform.rotation);
+            tool_state_calc_.pose.orientation.x = Toolbox::Convert::radToDeg(euler_angles.x);
+            tool_state_calc_.pose.orientation.y = Toolbox::Convert::radToDeg(euler_angles.y);
+            tool_state_calc_.pose.orientation.z = Toolbox::Convert::radToDeg(euler_angles.z);
+
+            // Calculate Derivatives (Velocity and Acceleration)
+            calculateToolDerivatives(tool_transform_stamped, tool_state_calc_);
+
+            // Publish Tool-State
+            tool_state_pub_.publish(tool_state_calc_);
+        }
+
+
+        // Calculate Joint-State Derivatives
+        // -------------------------------
+        void RobotStateProcessor::calculateJointDerivatives(
             const sensor_msgs::JointState::ConstPtr& joint_state_msg,
-            sensor_msgs::JointState& joint_state_calc)
+            robot_data_msgs::JointState& joint_state_calc)
         {
             // Calculate time difference
-            ros::Duration dt = joint_state_msg->header.stamp - prev_timestamp_;
+            ros::Duration dt = joint_state_msg->header.stamp - prev_joint_timestamp_;
 
-        } // Function End: calculateDerivatives()
+            // Check for zero time difference
+            if(dt.toSec() == 0.0)
+            {
+                // Function return
+                return;
+            }
 
+            // Iterate through joint-state message
+            for (int i = 0; i < joint_state_msg->name.size(); i++)
+            {
+                // Calculate joint velocity
+                // (numerical differentiation)
+                double velocity = Toolbox::Math::numericalDifferentiation(joint_state_msg->position[i], prev_joint_position_[i], dt.toSec());
+                joint_state_calc.velocity.push_back(velocity);
+
+                // Calculate joint acceleration
+                // (numerical differentiation)
+                double acceleration = Toolbox::Math::numericalDifferentiation(velocity, prev_joint_velocity_[i], dt.toSec());
+                joint_state_calc.acceleration.push_back(acceleration);
+
+                // Update previous joint values
+                prev_joint_position_[i] = joint_state_msg->position[i];
+                prev_joint_velocity_[i] = velocity;
+            }
+
+            // Update previous timestamp
+            prev_joint_timestamp_ = joint_state_msg->header.stamp;
+        } // Function End: calculateJointDerivatives()
+
+
+        // Calculate Tool-State Derivatives
+        // -------------------------------
+        void RobotStateProcessor::calculateToolDerivatives(
+            const geometry_msgs::TransformStamped& tool_transform,
+            robot_data_msgs::ToolState& tool_state_calc)
+        {
+            // Calculate time difference
+            ros::Duration dt = tool_transform.header.stamp - prev_tool_timestamp_;
+
+            // Check for zero time difference
+            if(dt.toSec() == 0.0)
+            {
+                // Function return
+                return;
+            }
+
+            // Calculate tool translational velocity
+            // (numerical differentiation)
+            tool_state_calc.velocity.linear.x = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.x, prev_tool_position_.position.x, dt.toSec());
+            tool_state_calc.velocity.linear.y = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.y, prev_tool_position_.position.y, dt.toSec());
+            tool_state_calc.velocity.linear.z = Toolbox::Math::numericalDifferentiation(tool_transform.transform.translation.z, prev_tool_position_.position.z, dt.toSec());
+
+            // Calculate tool rotational velocity
+            // (numerical differentiation)
+            geometry_msgs::Point euler_angles = Toolbox::Convert::quaternionToEuler(tool_transform_stamped.transform.rotation);
+            tool_state_calc.velocity.angular.x = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.x), prev_tool_position_.orientation.x, dt.toSec());
+            tool_state_calc.velocity.angular.y = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.y), prev_tool_position_.orientation.y, dt.toSec());
+            tool_state_calc.velocity.angular.z = Toolbox::Math::numericalDifferentiation(Toolbox::Convert::radToDeg(euler_angles.z), prev_tool_position_.orientation.z, dt.toSec());
+
+            // Update previous tool values
+            prev_tool_position_ = tool_state_calc.position;
+
+            // Update previous timestamp
+            prev_tool_timestamp_ = tool_transform.header.stamp;
+        } // Function End: calculateToolDerivatives()
 
 } // End Namespace: Control

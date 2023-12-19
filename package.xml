@@ -67,6 +67,7 @@
 
   <depend>robot_toolbox</depend>
   <depend>info_msgs</depend>
+  <depend>robot_data_msgs</depend>
   <depend>target_msgs</depend>
   <depend>object_msgs</depend>
 

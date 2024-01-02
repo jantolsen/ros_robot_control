@@ -39,6 +39,7 @@
     // ROS Messages
     #include <sensor_msgs/JointState.h>
     #include <geometry_msgs/Twist.h>
+    #include <geometry_msgs/Accel.h>
 
     // Robotics Toolbox
     #include "robot_toolbox/toolbox.h"

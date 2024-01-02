@@ -128,17 +128,8 @@ namespace Control
         void RobotStateProcessor::toolStateCallback()
         {
             // Get transformation from world to tool
-            geometry_msgs::TransformStamped tool_transform_stamped;
-            try
-            {
-                tool_transform_stamped = tfBuffer_.lookupTransform("world", "tool0", ros::Time(0));
-            }
-            catch (tf2::TransformException &ex) 
-            {
-                ROS_WARN("%s",ex.what());
-                ros::Duration(1.0).sleep();
-                return;
-            }
+            geometry_msgs::TransformStamped tool_transform_stamped; 
+            Toolbox::Kinematics::getCurrentTransform("tool0", "world", tool_transform_stamped);
 
             // Create new Tool-State
             robot_data_msgs::ToolState tool_state_calc_;
@@ -147,15 +138,12 @@ namespace Control
             tool_state_calc_.header = tool_transform_stamped.header;
             tool_state_calc_.frame = tool_transform_stamped.header.frame_id;
             tool_state_calc_.name = tool_transform_stamped.child_frame_id;
-            // Position
-            tool_state_calc_.pose.position.x = tool_transform_stamped.transform.translation.x;
-            tool_state_calc_.pose.position.y = tool_transform_stamped.transform.translation.y;
-            tool_state_calc_.pose.position.z = tool_transform_stamped.transform.translation.z;
-            // Orientation
-            geometry_msgs::Point euler_angles = Toolbox::Convert::quaternionToEuler(tool_transform_stamped.transform.rotation);
-            tool_state_calc_.pose.orientation.x = Toolbox::Convert::radToDeg(euler_angles.x);
-            tool_state_calc_.pose.orientation.y = Toolbox::Convert::radToDeg(euler_angles.y);
-            tool_state_calc_.pose.orientation.z = Toolbox::Convert::radToDeg(euler_angles.z);
+
+            // Convert transform to pose
+            geometry_msgs::Pose tool_pose = Toolbox::Convert::transformToPose(tool_transform_stamped.transform);
+
+            // Convert pose to pose-rpy
+            tool_state_calc_.pose = Toolbox::Convert::poseToPoseRPY(tool_pose);
 
             // Calculate Derivatives (Velocity and Acceleration)
             calculateToolDerivatives(tool_transform_stamped, tool_state_calc_);
@@ -235,9 +223,9 @@ namespace Control
 
             // Calculate tool translational acceleration
             // (numerical differentiation)
-            tool_state_calc.acceleration.linear.x = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.x, prev_tool_velocity_.linear.x, dt.toSec());
-            tool_state_calc.acceleration.linear.y = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.y, prev_tool_velocity_.linear.y, dt.toSec());
-            tool_state_calc.acceleration.linear.z = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.angular.z, prev_tool_velocity_.linear.z, dt.toSec());
+            tool_state_calc.acceleration.linear.x = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.linear.x, prev_tool_velocity_.linear.x, dt.toSec());
+            tool_state_calc.acceleration.linear.y = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.linear.y, prev_tool_velocity_.linear.y, dt.toSec());
+            tool_state_calc.acceleration.linear.z = Toolbox::Math::numericalDifferentiation(tool_state_calc.velocity.linear.z, prev_tool_velocity_.linear.z, dt.toSec());
 
             // Calculate tool rotational acceleration
             // (numerical differentiation)
